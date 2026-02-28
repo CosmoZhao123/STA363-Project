@@ -103,9 +103,11 @@ if (length(col_blocks) > 1) {
 }
 ```
 
-## Check for multicollinearity among features
+As shown in Table 1 & 2 above, our raw data includes in total of (22) columns, with (1) response variable (Y: Salary in US Dollar), and (21) features (3 categorical and 18 numerical). However, there are some issues within our feature set, particularly potential multicollinearity among the predictors. Therefore, we are going to conduct a multicollinearity check across all features and remove those with strong correlations with each other.
 
-# Attention about title and caption
+Additionally, ‘Player Name’, ‘Position’, and ‘Team’ are not useful categorical variables for predicting salary and may introduce unnecessary noise into the model. Therefore, we will also remove them during our data cleaning process.
+
+## Check for multicollinearity among features
 
 ```{r,fig.asp = 1}
 # Select numeric variables only
@@ -126,10 +128,12 @@ corrplot(cor_mat,
 
 ```
 
-blahblahblahblahblahblah
+As shown in Figure 1 above, many features exhibit strong correlations with one another. For example, Field Goals Made is highly correlated with Points, and Minutes Played is strongly correlated with both Field Goals Made and Points. Three-Point Attempts also shows a strong correlation with Three-Point Field Goals Made. In addition, Total Rebounds is closely related to Blocks, and Free Throws Made is strongly associated with Free Throw Attempts.
 
+Such high correlations across predictors may lead to multicollinearity, which can inflate variance, destabilize coefficient estimates, and reduce model interpretability. Therefore, we are going to remove features that show strong correlations with each other in order to reduce redundancy and improve model stability.
 
 ## The Data 
+
 ```{r}
 mydata_clean <- mydata %>%
   dplyr::select(
@@ -145,8 +149,11 @@ mydata_clean <- mydata %>%
 knitr::kable(mydata_clean[1:10,], caption = "The First 10 Rows of Our Data")
 ```
 
-these are features we are gonna use, blahblahblah
+After data processing, we selected the (6) features that most strongly affect our prediction while showing no strong correlation with each other, and created the final dataset used in this report. As shown above in Table 3, we present the first ten rows of our cleaned dataset.
 
+To help our client better understand the acronyms used in the dataset, Table 4 provides the full names and definitions of each variable included in the model.
+
+For the complete dataset used in this analysis, please refer to [Appendix A](#appendix-a) at the end of this report.
 
 ```{r}
 glossary <- data.frame(
@@ -165,19 +172,104 @@ glossary <- data.frame(
 kable(glossary,
       booktabs = TRUE,
       col.names = c("Acronym", "Explanation"),
-      caption = "Table: Variable Definitions") %>%
+      caption = "Variable Definitions") %>%
   kable_styling(latex_options = "hold_position")
 ```
 
 ## Data Exploration
 
+### Research Question 1: How does the players' salary change over MP (Minutes played Per game)?
+
+```{r}
+ggplot(mydata_clean, aes(x = MP, y = Salary)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(x = "Minutes played Per game (MP)", y = "Salary ($)", caption = "Figure 2: The relationship between minutes played per game and salary")
+```
+
+As shown in Figure 2 above, although there is a clear positive relationship between Minutes Played per game and Salary, the pattern does not appear strictly linear. The spread of the data increases as Minutes Played increases, indicating potential heteroskedasticity, and the relationship appears slightly curved rather than perfectly linear. This suggests that a linear model on the raw Salary variable may not be the most appropriate specification.
+
+Therefore, it seems that applying a logarithmic transformation to Salary may provide a better fit. By modeling log(Salary) instead of Salary, we can stabilize the variance, reduce skewness in the response variable, and potentially achieve a more linear relationship between Minutes Played and Salary. Consequently, we will repeat the same analysis using log(Salary) as the response variable.
+
+```{r}
+ggplot(mydata_clean, aes(x = MP, y = log(Salary))) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = TRUE, color = "red") +
+  labs(x = "Minutes played Per game (MP)", y = "Log(Salary) ($)", caption = "Figure 3: The relationship between minutes played per game and log salary")
+```
+
+The log transformation appears to substantially improve the linearity of the relationship between Minutes Played per game and Salary. As shown in Figure 3, when modeling log(Salary) against Minutes Played, the data points align more closely around the fitted regression line compared to the raw Salary model.
+
+In addition, the variance of the residuals appears more stable across different levels of Minutes Played. The relationship now shows a clearer linear trend, suggesting that a linear regression model with log(Salary) as the response variable is more appropriate than using raw Salary.
+
+Based on the scatterplot and the fitted regression line, players’ salary increases as Minutes Played per game increases. There is a clear positive relationship between playing time and compensation: players who average more minutes per game tend to earn higher salaries.
+
+When examining the raw Salary model, the relationship appears upward sloping but exhibits increasing variability at higher levels of Minutes Played, indicating potential nonlinearity. After applying a logarithmic transformation to Salary, the relationship becomes more linear and the variance appears more stable. The fitted regression line in the log(Salary) model confirms a strong positive association between Minutes Played and salary.
+
+Interpreting the log-scale model, this suggests that each additional minute played per game is associated with a proportional (percentage) increase in salary rather than a constant dollar increase.
+
+## Section 3
+
+```{r}
+compute_RMSE <- function(actual, prediction) {
+  error <- actual - prediction
+  rmse <- sqrt(mean(error^2))
+  return(rmse)
+}
+
+##LOOCV
+Kchoice<-data.frame("Choice of K"=2:50,"RMSE"=rep(NA,49))
+n<-nrow(mydata_clean)
+for(k in 2:50){
+  yhat<-rep(NA,n)
+  for(i in 1:n){
+    train<-mydata_clean[-i,]
+    validation<-mydata_clean[i,]
+    yhat[i]<-knnregTrain(train[,-1],
+                         validation[,-1],
+                         train[,1],
+                         k=k)
+  }
+  Kchoice[k-1,"RMSE"]<-compute_RMSE(mydata_clean$Salary,yhat)
+}
+
+
+## 5 fold CV
+Kchoice2<-data.frame("Choice of K"=2:50,"RMSE"=rep(NA,49))
+folds<-rep(1:5,n/5+1)
+fold<-sample(folds,n,replace=FALSE)
+for(k in 2:50){
+  yhat<-rep(NA,n)
+  for(i in 1:5){
+    infold<-which(fold==i)
+    train<-mydata_clean[-infold,]
+    validation<-mydata_clean[infold,]
+    yhat[infold]<-knnregTrain(train[,-1],
+                         validation[,-1],
+                         train[,1],
+                         k=k)
+  }
+  Kchoice2[k-1,"RMSE"]<-compute_RMSE(mydata_clean$Salary,yhat)
+}
+
+
+plot_data <- data.frame(
+  Actual = mydata_clean$Salary,
+  Predicted = yhat
+)
+
+ggplot(plot_data, aes(x = Actual, y = Predicted)) +
+  geom_point()
+mean(mydata_clean$Salary)
+```
 
 
 
 \newpage
-# Appendix A: The Data
+# Appendix A: The Data {#appendix-a}
 
 ```{r}
 knitr::kable(mydata_clean, title = "The Original Data")
 ```
+
 
